@@ -1,0 +1,27 @@
+# Padroes que NUNCA podem ir para um texto publico (diff, titulo do PR, comentarios).
+# Uma expressao regular por linha (Python, sem distinguir maiusculas). Linhas com # sao ignoradas.
+# Copia para padroes_privados.txt e ACRESCENTA os teus: nome, nome de utilizador, e-mail, dominio, pastas.
+# Este ficheiro (o teu, com os teus dados) nunca vai para o repositorio: esta no .gitignore.
+
+# redes privadas e enderecos de casa
+\b10\.\d{1,3}\.\d{1,3}\.\d{1,3}\b
+\b192\.168\.\d{1,3}\.\d{1,3}\b
+\b172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b
+\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b
+\.ts\.net\b
+# pastas pessoais
+[A-Za-z]:\\Users\\
+/home/[a-z]
+# chaves e tokens com formato conhecido
+\bgh[pousr]_[A-Za-z0-9]{20,}
+\bsk-[A-Za-z0-9_-]{20,}
+\bxox[abp]-[A-Za-z0-9-]{10,}
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+\bAKIA[0-9A-Z]{16}\b
+# e-mails (tira esta linha se o teu repositorio tiver e-mails publicos de proposito)
+[\w.+-]+@[\w-]+\.[\w.]+
+
+# --- os teus (exemplos: tira o # e muda) ---
+# o-meu-nome
+# o-meu-utilizador
+# o-meu-dominio\.pt

@@ -1,0 +1,10 @@
+[Unit]
+Description=recetor-webhooks de 30 em 30 s
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

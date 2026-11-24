@@ -1,0 +1,21 @@
+[Unit]
+Description=Discord aprovacoes (botoes Aprovar/Recusar e avisos, com API local)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=aprovacoes
+Group=aprovacoes
+WorkingDirectory=/opt/discord-aprovacoes
+EnvironmentFile=/etc/discord-aprovacoes/discord-aprovacoes.env
+ExecStart=/opt/discord-aprovacoes/venv/bin/python /opt/discord-aprovacoes/bot.py
+Restart=always
+RestartSec=15
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/discord-aprovacoes /var/log/discord-aprovacoes
+
+[Install]
+WantedBy=multi-user.target

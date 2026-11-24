@@ -1,0 +1,36 @@
+{
+  "org": "a-tua-org-ou-utilizador",
+  "repos": {
+    "o-teu-repo": "C:\\repos\\o-teu-repo",
+    "outro-repo": "C:\\repos\\outro-repo"
+  },
+  "ramo_base": "main",
+  "categorias_discussao": ["ideas"],
+  "inicio": "2026-01-01T00:00:00Z",
+  "aprovacoes": {
+    "url": "http://10.0.0.30:8790",
+    "canal": "melhorias",
+    "origem": "melhorias"
+  },
+  "programas": {
+    "gh": "gh",
+    "git": "git",
+    "claude": "claude"
+  },
+  "modelo": "sonnet",
+  "max_turnos": 40,
+  "tempo_max_agente_s": 1500,
+  "max_analises_dia": 6,
+  "max_ficheiros": 15,
+  "max_linhas": 400,
+  "caminhos_proibidos": [".github/workflows/", ".git/", ".claude/", "LICENSE", ".gitattributes"],
+  "padroes_privados": "padroes_privados.txt",
+  "autor_commits": {
+    "nome": "Bot de melhorias",
+    "email": "o-teu-utilizador@users.noreply.github.com"
+  },
+  "textos": {
+    "aprovado": "Obrigado pelo pedido! 🙌 A alteração foi revista e já está no ramo principal (#{pr}). Se notares mais alguma coisa, abre outro pedido.",
+    "recusado": "Obrigado pelo pedido! Analisámos e, para já, não vamos avançar com esta alteração. Se tiveres mais detalhes ou outro caso de uso, comenta aqui."
+  }
+}

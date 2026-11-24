@@ -1,0 +1,1315 @@
+[
+ {
+  "id": "autoInstaPublica",
+  "name": "Instagram: decisão e publicação",
+  "active": false,
+  "nodes": [
+   {
+    "id": "48d6ef45-17b8-5ce9-83cd-9dfc60034b1c",
+    "name": "Decisão (callback do serviço)",
+    "type": "n8n-nodes-base.webhook",
+    "typeVersion": 2,
+    "position": [
+     0,
+     0
+    ],
+    "parameters": {
+     "httpMethod": "POST",
+     "path": "publicar-decisao",
+     "responseMode": "onReceived",
+     "options": {},
+     "authentication": "headerAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "webhookId": "17b32e31-a0e0-5cc8-8ce9-6b7eefe60e60"
+   },
+   {
+    "id": "3fc0421c-4391-5b45-ab84-3e34966fc552",
+    "name": "Qual aprovação?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     220,
+     0
+    ],
+    "parameters": {
+     "jsCode": "const b = $json.body || {};\nif (b.origem !== 'n8n-instagram' || !/^apr-ig-[a-f0-9]{12,32}$/.test(String(b.id || '')))\n  throw new Error('decisão inválida recebida no webhook: ' + JSON.stringify(b).slice(0, 200));\nreturn { json: { aid: b.id, fases: null } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "5800b13f-489e-52d4-9b7a-b257b62a274e",
+    "name": "A cada 5 min (agendadas)",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     0,
+     300
+    ],
+    "parameters": {
+     "rule": {
+      "interval": [
+       {
+        "field": "minutes",
+        "minutesInterval": 5
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "6d0500b6-7836-5bee-8aa0-ec63c3a99f92",
+    "name": "Listar agendadas",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     220,
+     300
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "http://10.0.0.30:8790/aprovacoes?origem=n8n-instagram&estado=pendente&fase=agendado",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "30d6f28d-8e7c-5b89-b1f2-125d5b977bad",
+    "name": "Chegou a hora?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     440,
+     300
+    ],
+    "parameters": {
+     "jsCode": "// Agendadas cuja hora já chegou (no máximo 3 por volta: o Instagram demora a processar).\nconst r = $input.first().json;\nconst lista = Array.isArray(r.body) ? r.body : [];\nconst agora = Date.now();\nconst prontas = lista.filter((a) => a.contexto && a.contexto.quando_iso && Date.parse(a.contexto.quando_iso) <= agora);\nreturn prontas.slice(0, 3).map((a) => ({ json: { aid: a.id, fases: ['agendado'] } }));\n"
+    }
+   },
+   {
+    "id": "1905c60b-64e1-55ca-a1a5-c529283b1bac",
+    "name": "Reservar (só uma vez)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     660,
+     120
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "=http://10.0.0.30:8790/aprovacao/{{ $json.aid }}/reservar",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify({ fases: $json.fases }) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    }
+   },
+   {
+    "id": "24bea817-d427-5bdc-bbad-ec48ffc52f96",
+    "name": "O que fazer?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     880,
+     120
+    ],
+    "parameters": {
+     "jsCode": "// O serviço só deixa reservar uma vez: cliques repetidos e a volta das agendadas não fazem nada a dobrar.\nconst r = $json.body || {};\nconst c = r.contexto || {};\nlet acao = 'nada';\nif (r.ok && r.decisao == null) acao = r.fase === 'agendado' ? 'publicar' : 'nada';   // agendada: a hora chegou\nelse if (r.ok) acao = r.decisao;                                                     // botão carregado\nreturn { json: { acao, aid: c.aid, contexto: c } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "684dc708-b94e-5f3e-acfc-654cd920e964",
+    "name": "Que botão?",
+    "type": "n8n-nodes-base.switch",
+    "typeVersion": 3.2,
+    "position": [
+     1100,
+     120
+    ],
+    "parameters": {
+     "rules": {
+      "values": [
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "9c879a84-f557-502b-b7b1-bd51b83ce3d7",
+           "leftValue": "={{ $json.acao }}",
+           "rightValue": "publicar",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "publicar"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "e1dd4a4e-2328-53ba-a3fe-5a6fa0bab887",
+           "leftValue": "={{ $json.acao }}",
+           "rightValue": "agendar",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "agendar"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "49d88ed2-61ad-5222-bc37-416e8306f5da",
+           "leftValue": "={{ $json.acao }}",
+           "rightValue": "editar",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "editar"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "1881d35f-43df-53e7-933a-7cf7acc42a81",
+           "leftValue": "={{ $json.acao }}",
+           "rightValue": "nao",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "nao"
+       }
+      ]
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "410ecec4-aaf7-5aab-b580-b87dada5ac9d",
+    "name": "Agendar",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1320,
+     160
+    ],
+    "parameters": {
+     "jsCode": "const c = $json.contexto;\nif (!c.quando_iso) return { json: { aid: c.aid, corpo: { estado: 'pendente', fase: 'erro', nota: '⚠️ Esta imagem não tem hora marcada.',\n  botoes: [{ id: 'publicar', rotulo: 'Publicar agora', emoji: '✅', estilo: 'sucesso' }, { id: 'nao', rotulo: 'Não publicar', emoji: '❌', estilo: 'perigo' }] } } };\nreturn { json: { aid: c.aid, corpo: { estado: 'pendente', fase: 'agendado', cor: 'azul',\n  nota: `🕒 Agendado para ${c.quando_pt}. Publico sozinho a essa hora (até 5 min depois). Ainda podes publicar já ou cancelar.`,\n  botoes: [{ id: 'publicar', rotulo: 'Publicar já', emoji: '✅', estilo: 'sucesso' }, { id: 'nao', rotulo: 'Cancelar (não publicar)', emoji: '❌', estilo: 'perigo' }] } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "80bfc593-77be-55e9-bb93-47f26af62175",
+    "name": "Editar",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1320,
+     300
+    ],
+    "parameters": {
+     "jsCode": "const c = $json.contexto;\nreturn { json: { aid: c.aid, corpo: { estado: 'concluido', fase: 'editar', apagar_imagem: true, cor: 'cinzento',\n  resultado: `✏️ À espera da versão editada: muda \\`${c.base}.txt\\` (ou a imagem) na pasta e grava. Nada foi publicado.` } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "7e2869b0-b717-5272-845d-3be2e56f8b4f",
+    "name": "Não publicar",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1320,
+     440
+    ],
+    "parameters": {
+     "jsCode": "const c = $json.contexto;\nreturn { json: { aid: c.aid, corpo: { estado: 'concluido', fase: 'recusado', apagar_imagem: true, cor: 'vermelho',\n  resultado: '❌ Não publicado. O script da pasta move os ficheiros para recusados (na volta seguinte).' } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "61dcb6f3-bcc3-54bf-96a8-d439568fe6b1",
+    "name": "Preparar publicação",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1320,
+     -60
+    ],
+    "parameters": {
+     "jsCode": "const c = $json.contexto;\nif (!c || !c.aid || !c.legenda) throw new Error('aprovação sem contexto para publicar');\nreturn { json: { aid: c.aid, legenda: c.legenda, nome: c.nome, teste: c.teste === true } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "0c98ff9a-8882-5792-8311-7f078c2bdf56",
+    "name": "Quota do Instagram",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     1540,
+     -60
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "https://graph.instagram.com/v23.0/ID_DA_CONTA_INSTAGRAM/content_publishing_limit?fields=config,quota_usage",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-instagram",
+      "name": "Instagram (Authorization: Bearer)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "a15344b4-0a3d-51e5-80e4-062c075e5740",
+    "name": "Chave temporária da imagem",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     1760,
+     -60
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "=http://10.0.0.30:8790/aprovacao/{{ $('Preparar publicação').item.json.aid }}/chave",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "0263de2a-dcb8-50f7-897f-87caa5a3219f",
+    "name": "Pronto para criar?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1980,
+     -60
+    ],
+    "parameters": {
+     "jsCode": "// A imagem fica em privado no serviço; o Instagram vai buscá-la ao webhook público com uma chave de 15 min.\nconst p = $('Preparar publicação').item.json;\nconst q = $('Quota do Instagram').item.json;\nconst k = $json;\nlet erro = null;\nconst quota = q.statusCode === 200 && q.body && q.body.data && q.body.data[0];\nif (!quota) erro = 'não consegui ler a quota do Instagram (token caducado?): ' + JSON.stringify(q.body || q.error || '').slice(0, 200);\nelse if ((quota.quota_usage || 0) >= ((quota.config || {}).quota_total || 50)) erro = `quota de publicações das últimas 24 h esgotada (${quota.quota_usage})`;\nelse if (k.statusCode !== 200 || !k.body || !k.body.chave) erro = 'não consegui preparar a imagem no serviço: ' + JSON.stringify(k.body || k.error || '').slice(0, 200);\nreturn { json: { ...p, erro, image_url: erro ? null : 'https://n8n.example.com/webhook/publicar-imagem?c=' + encodeURIComponent(k.body.chave) } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "391bf574-04bf-5a35-83db-43e55230d268",
+    "name": "Sem erro?",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [
+     2200,
+     -60
+    ],
+    "parameters": {
+     "conditions": {
+      "options": {
+       "caseSensitive": true,
+       "leftValue": "",
+       "typeValidation": "loose",
+       "version": 2
+      },
+      "conditions": [
+       {
+        "id": "365dafff-99f5-5168-8118-5998e5ca5020",
+        "leftValue": "={{ !$json.erro }}",
+        "rightValue": true,
+        "operator": {
+         "type": "boolean",
+         "operation": "true",
+         "singleValue": true
+        }
+       }
+      ],
+      "combinator": "and"
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "62d8592d-a6cc-5887-af99-0ccdb0dc8dc1",
+    "name": "Criar contentor (ainda não publica)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     2420,
+     -140
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "https://graph.instagram.com/v23.0/ID_DA_CONTA_INSTAGRAM/media",
+     "options": {
+      "timeout": 120000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify({ image_url: $json.image_url, caption: $json.legenda }) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-instagram",
+      "name": "Instagram (Authorization: Bearer)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "6b607827-f82e-5ddd-a905-1ac1645cae2f",
+    "name": "Esperar o Instagram",
+    "type": "n8n-nodes-base.wait",
+    "typeVersion": 1.1,
+    "position": [
+     2640,
+     -140
+    ],
+    "parameters": {
+     "resume": "timeInterval",
+     "amount": 6,
+     "unit": "seconds"
+    },
+    "webhookId": "7261fe10-a859-5a14-8302-9e248adeaaf3"
+   },
+   {
+    "id": "f0a3e2e2-a9f3-5184-935d-c52223d12926",
+    "name": "Estado do contentor",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     2860,
+     -140
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "=https://graph.instagram.com/v23.0/{{ $('Criar contentor (ainda não publica)').item.json.body.id || 'sem-id' }}?fields=status_code,status",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-instagram",
+      "name": "Instagram (Authorization: Bearer)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "1d3b107e-1a22-5c37-89c9-c298507c1e21",
+    "name": "Contentor pronto?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     3080,
+     -140
+    ],
+    "parameters": {
+     "jsCode": "const p = $('Pronto para criar?').item.json;\nconst criar = $('Criar contentor (ainda não publica)').item.json;\nconst s = $json;\nconst tentativa = $runIndex;   // cada volta pelo «Esperar» conta uma\nlet estado = 'erro', erro = null;\nconst id = criar.body && criar.body.id;\nif (!id) erro = 'o Instagram recusou criar a publicação: ' + JSON.stringify(criar.body || criar.error || '').slice(0, 300);\nelse {\n  const sc = s.body && s.body.status_code;\n  if (sc === 'FINISHED') estado = 'pronto';\n  else if ((sc === 'IN_PROGRESS' || !sc) && tentativa < 15) estado = 'esperar';\n  else erro = `o Instagram não processou a imagem (${sc || 'sem resposta'}): ` + JSON.stringify((s.body && s.body.status) || s.body || '').slice(0, 200);\n}\nreturn { json: { ...p, estado: p.teste && estado === 'pronto' ? 'teste' : estado, erro, contentor: id || null } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "a5ada48d-4c47-528b-9c2c-cb14bb7e242d",
+    "name": "Continuar?",
+    "type": "n8n-nodes-base.switch",
+    "typeVersion": 3.2,
+    "position": [
+     3300,
+     -140
+    ],
+    "parameters": {
+     "rules": {
+      "values": [
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "f19ef27d-f132-59a3-8c5c-3ed095524d5a",
+           "leftValue": "={{ $json.estado }}",
+           "rightValue": "pronto",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "pronto"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "ddce1446-f846-53b7-b7a2-8d89c97c578e",
+           "leftValue": "={{ $json.estado }}",
+           "rightValue": "esperar",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "esperar"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "aa1beaf4-7cd5-5285-a823-2e18006237f7",
+           "leftValue": "={{ $json.estado }}",
+           "rightValue": "teste",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "teste"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "4c0470da-04be-5754-a94e-91575c48750a",
+           "leftValue": "={{ $json.estado }}",
+           "rightValue": "erro",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "erro"
+       }
+      ]
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "f8f41bac-cb52-5848-b960-08d1bcfa7bc3",
+    "name": "Publicar (media_publish)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     3520,
+     -260
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "https://graph.instagram.com/v23.0/ID_DA_CONTA_INSTAGRAM/media_publish",
+     "options": {
+      "timeout": 120000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify({ creation_id: $json.contentor }) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-instagram",
+      "name": "Instagram (Authorization: Bearer)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "62bdb332-cfc1-5513-b3fd-feb751b20455",
+    "name": "Link da publicação",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     3740,
+     -260
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "=https://graph.instagram.com/v23.0/{{ ($json.body && $json.body.id) || 'sem-id' }}?fields=permalink,timestamp",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-instagram",
+      "name": "Instagram (Authorization: Bearer)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "b3585013-e28f-5c8e-bfcf-27769508859e",
+    "name": "Resultado da publicação",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     3960,
+     -260
+    ],
+    "parameters": {
+     "jsCode": "const p = $('Contentor pronto?').item.json;\nconst pub = $('Publicar (media_publish)').item.json;\nconst media = pub.body && pub.body.id;\nconst hora = DateTime.now().setZone('Europe/Lisbon').toFormat(\"dd/MM 'às' HH:mm\");\nif (!media) {\n  return { json: { aid: p.aid, corpo: { estado: 'pendente', fase: 'erro', cor: 'laranja',\n    nota: '⚠️ O Instagram recusou publicar: ' + JSON.stringify(pub.body || pub.error || '').slice(0, 300) +\n          '\\nConfirma no perfil que não saiu antes de tentares outra vez.',\n    botoes: [{ id: 'publicar', rotulo: 'Tentar outra vez', emoji: '🔁', estilo: 'primario' }, { id: 'nao', rotulo: 'Não publicar', emoji: '❌', estilo: 'perigo' }] } } };\n}\nconst link = ($json.body && $json.body.permalink) || 'https://www.instagram.com/';\nreturn { json: { aid: p.aid, corpo: { estado: 'concluido', fase: 'publicado', apagar_imagem: true, cor: 'verde',\n  resultado: `✅ Publicado a ${hora}: ${link}`, ligacoes: [{ rotulo: 'Ver no Instagram', url: link }],\n  contexto: { link, media_id: media } } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "72cc1070-d4f8-5be7-b015-a98b795e8a63",
+    "name": "Teste: não publicar",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     3520,
+     -100
+    ],
+    "parameters": {
+     "jsCode": "// Modo [teste]: o contentor foi criado (prova que o Instagram conseguiu ir buscar a imagem), mas NÃO se chama o\n// media_publish. Um contentor não publicado não aparece em lado nenhum e caduca sozinho em 24 h.\nconst p = $json;\nreturn { json: { aid: p.aid, corpo: { estado: 'concluido', fase: 'teste_contentor', apagar_imagem: true, cor: 'cinzento',\n  resultado: `🧪 Teste: o Instagram foi buscar a imagem e criou o contentor ${p.contentor}, mas NÃO foi publicado.` } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "d8486e99-8906-5f5d-91dd-1899b65b91ae",
+    "name": "Explicar erro (nada publicado)",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     3520,
+     60
+    ],
+    "parameters": {
+     "jsCode": "const p = $json;\nreturn { json: { aid: p.aid, corpo: { estado: 'pendente', fase: 'erro', cor: 'laranja',\n  nota: '⚠️ Falhou antes de publicar (nada saiu no Instagram): ' + String(p.erro || 'erro desconhecido').slice(0, 600),\n  botoes: [{ id: 'publicar', rotulo: 'Tentar outra vez', emoji: '🔁', estilo: 'primario' }, { id: 'nao', rotulo: 'Não publicar', emoji: '❌', estilo: 'perigo' }] } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "c5df2447-395d-54b3-bb3d-5e311b775b23",
+    "name": "Atualizar aprovação",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     4180,
+     120
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "=http://10.0.0.30:8790/aprovacao/{{ $json.aid }}/atualizar",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.corpo) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    }
+   },
+   {
+    "id": "f5c50668-f606-5bdc-8002-c185b63a3d5b",
+    "name": "Instagram vem buscar a imagem",
+    "type": "n8n-nodes-base.webhook",
+    "typeVersion": 2,
+    "position": [
+     0,
+     700
+    ],
+    "parameters": {
+     "httpMethod": "GET",
+     "path": "publicar-imagem",
+     "responseMode": "responseNode",
+     "options": {}
+    },
+    "webhookId": "7a986723-b6f9-5411-b5d1-d3454f8f88c4"
+   },
+   {
+    "id": "560848ea-8745-5958-8bd1-3e9b4951c8be",
+    "name": "Chave com bom aspeto?",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [
+     220,
+     700
+    ],
+    "parameters": {
+     "conditions": {
+      "options": {
+       "caseSensitive": true,
+       "leftValue": "",
+       "typeValidation": "loose",
+       "version": 2
+      },
+      "conditions": [
+       {
+        "id": "bc484b85-e4d5-5d10-be7a-39c415b1c050",
+        "leftValue": "={{ /^[A-Za-z0-9_-]{30,60}$/.test(String(($json.query || {}).c || '')) }}",
+        "rightValue": true,
+        "operator": {
+         "type": "boolean",
+         "operation": "true",
+         "singleValue": true
+        }
+       }
+      ],
+      "combinator": "and"
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "3f2cda6e-7ad5-5b85-a5f6-9c6902aa5013",
+    "name": "Ler imagem do serviço",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     440,
+     640
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "=http://10.0.0.30:8790/aprovacao-imagem/{{ $json.query.c }}",
+     "options": {
+      "timeout": 30000,
+      "response": {
+       "response": {
+        "responseFormat": "file"
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueErrorOutput"
+   },
+   {
+    "id": "436f6397-e0e9-50a0-be57-8b274e5009a5",
+    "name": "Dar a imagem",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     660,
+     600
+    ],
+    "parameters": {
+     "respondWith": "binary",
+     "inputDataFieldName": "data",
+     "options": {
+      "responseCode": 200,
+      "responseHeaders": {
+       "entries": [
+        {
+         "name": "Cache-Control",
+         "value": "no-store"
+        },
+        {
+         "name": "X-Robots-Tag",
+         "value": "noindex"
+        }
+       ]
+      }
+     }
+    }
+   },
+   {
+    "id": "9b7f885c-59ce-5da8-b7c4-04dbdf0cbdf6",
+    "name": "Não existe",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     660,
+     780
+    ],
+    "parameters": {
+     "respondWith": "json",
+     "responseBody": "={{ JSON.stringify({ erro: \"nao existe\" }) }}",
+     "options": {
+      "responseCode": 404
+     }
+    }
+   }
+  ],
+  "connections": {
+   "Decisão (callback do serviço)": {
+    "main": [
+     [
+      {
+       "node": "Qual aprovação?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "A cada 5 min (agendadas)": {
+    "main": [
+     [
+      {
+       "node": "Listar agendadas",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Listar agendadas": {
+    "main": [
+     [
+      {
+       "node": "Chegou a hora?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Qual aprovação?": {
+    "main": [
+     [
+      {
+       "node": "Reservar (só uma vez)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Chegou a hora?": {
+    "main": [
+     [
+      {
+       "node": "Reservar (só uma vez)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Reservar (só uma vez)": {
+    "main": [
+     [
+      {
+       "node": "O que fazer?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "O que fazer?": {
+    "main": [
+     [
+      {
+       "node": "Que botão?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Que botão?": {
+    "main": [
+     [
+      {
+       "node": "Preparar publicação",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Agendar",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Editar",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Não publicar",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Preparar publicação": {
+    "main": [
+     [
+      {
+       "node": "Quota do Instagram",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Quota do Instagram": {
+    "main": [
+     [
+      {
+       "node": "Chave temporária da imagem",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Chave temporária da imagem": {
+    "main": [
+     [
+      {
+       "node": "Pronto para criar?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Pronto para criar?": {
+    "main": [
+     [
+      {
+       "node": "Sem erro?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Sem erro?": {
+    "main": [
+     [
+      {
+       "node": "Criar contentor (ainda não publica)",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Explicar erro (nada publicado)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Criar contentor (ainda não publica)": {
+    "main": [
+     [
+      {
+       "node": "Esperar o Instagram",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Esperar o Instagram": {
+    "main": [
+     [
+      {
+       "node": "Estado do contentor",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Estado do contentor": {
+    "main": [
+     [
+      {
+       "node": "Contentor pronto?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Contentor pronto?": {
+    "main": [
+     [
+      {
+       "node": "Continuar?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Continuar?": {
+    "main": [
+     [
+      {
+       "node": "Publicar (media_publish)",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Esperar o Instagram",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Teste: não publicar",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Explicar erro (nada publicado)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Publicar (media_publish)": {
+    "main": [
+     [
+      {
+       "node": "Link da publicação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Link da publicação": {
+    "main": [
+     [
+      {
+       "node": "Resultado da publicação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Agendar": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Editar": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Não publicar": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Resultado da publicação": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Teste: não publicar": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Explicar erro (nada publicado)": {
+    "main": [
+     [
+      {
+       "node": "Atualizar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Instagram vem buscar a imagem": {
+    "main": [
+     [
+      {
+       "node": "Chave com bom aspeto?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Chave com bom aspeto?": {
+    "main": [
+     [
+      {
+       "node": "Ler imagem do serviço",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Não existe",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Ler imagem do serviço": {
+    "main": [
+     [
+      {
+       "node": "Dar a imagem",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Não existe",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "all",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner",
+   "errorWorkflow": "autoAvisarErros1"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]

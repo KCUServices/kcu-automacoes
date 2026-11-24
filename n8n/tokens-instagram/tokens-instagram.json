@@ -1,0 +1,200 @@
+[
+ {
+  "id": "autoTokensInsta1",
+  "name": "Renovar tokens do Instagram",
+  "active": false,
+  "nodes": [
+   {
+    "id": "43f66fc8-fe29-5d53-9738-b64c1034aac1",
+    "name": "Toda a segunda às 10:00",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     0,
+     -100
+    ],
+    "parameters": {
+     "rule": {
+      "interval": [
+       {
+        "field": "weeks",
+        "weeksInterval": 1,
+        "triggerAtDay": [
+         1
+        ],
+        "triggerAtHour": 10,
+        "triggerAtMinute": 0
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "b5fcf52f-d072-5fee-aae0-44f255049d13",
+    "name": "Executar à mão",
+    "type": "n8n-nodes-base.manualTrigger",
+    "typeVersion": 1,
+    "position": [
+     0,
+     100
+    ],
+    "parameters": {}
+   },
+   {
+    "id": "21335db5-c0b2-555b-a914-9b24dab2e4fd",
+    "name": "Opções",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     240,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// Opções desta volta. À mão podes pôr forcar: true (renova já, se o token tiver mais de 24 h)\n// ou teste: true (só verifica, não renova; os avisos saem marcados [teste]).\nreturn [{ json: { teste: false, forcar: false } }];\n"
+    }
+   },
+   {
+    "id": "69702e33-a9ef-5975-8915-c8adc896df75",
+    "name": "Renovar na sonda",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     480,
+     0
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://172.17.0.1:8791/instagram/renovar",
+     "options": {
+      "timeout": 300000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify({ teste: $json.teste, forcar: $json.forcar }) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-sonda",
+      "name": "Sonda (X-Token)"
+     }
+    },
+    "alwaysOutputData": true,
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "1f34d245-2947-5acc-8118-6530715800a3",
+    "name": "Decidir avisos",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     720,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// Avisa só quando importa: falhou, faltam 10 dias ou menos, ou houve renovação (verde, sem menção).\nconst passos = (conta, cred) => [\n  '**Como gerar um token novo à mão (5 min):**',\n  '1. developers.facebook.com → **My Apps** → a tua app do Instagram.',\n  '2. **Instagram → API setup with Instagram business login**.',\n  `3. Em «Generate access tokens», **Generate token** na conta **@${conta}** e entra com essa conta.`,\n  '4. Copia o token (começa por `IGAA`).',\n  `5. No n8n: **Credentials → «${cred || 'a credencial dessa conta'}»** → **Value** = \\`Bearer \\` + o token → **Save** (mantém o nome).`,\n  '6. A renovação automática trata dele 24 h depois.',\n].join('\\n');\nconst r = $json;\nconst teste = !!$('Opções').first().json.teste;\nconst avisos = [];\nconst CANAL = 'alertas';\nconst LINK = [{ texto: 'Abrir Meta for Developers', url: 'https://developers.facebook.com/apps/' }];\nconst data = (iso) => iso ? new Date(iso).toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '?';\nif (r.error || !Array.isArray(r.contas)) {\n  const m = r.error ? (r.error.message || JSON.stringify(r.error)) : (r.erro || JSON.stringify(r).slice(0, 300));\n  avisos.push({ canal: CANAL, nivel: 'erro', mencionar: !teste, teste,\n    titulo: 'Tokens do Instagram: a renovação não correu',\n    descricao: 'A sonda não respondeu ou recusou o pedido. Os tokens NÃO foram renovados nesta volta.\\n\\nVer `systemctl status n8n-sonda` e `/var/log/n8n-sonda/sonda.log` no anfitrião do n8n.',\n    campos: [{ nome: 'Erro', valor: String(m).slice(0, 900) }], rodape: 'n8n: renovar tokens do Instagram' });\n} else {\n  for (const c of r.contas) {\n    if (!c.ok) {\n      avisos.push({ canal: CANAL, nivel: 'erro', mencionar: !teste, teste,\n        titulo: `Token do Instagram @${c.conta || '?'}: falhou`, descricao: passos(c.conta, c.credencial),\n        campos: [{ nome: 'O que aconteceu', valor: c.erro || '?' },\n                 { nome: 'Credencial n8n', valor: c.credencial || c.id, inline: true },\n                 { nome: 'Validade conhecida', valor: c.expira_em ? `${data(c.expira_em)} (${c.dias} dias${c.estimado ? ', estimada' : ''})` : '?', inline: true }],\n        links: LINK, rodape: 'n8n: renovar tokens do Instagram' });\n    } else if (c.dias !== null && c.dias <= 10) {\n      avisos.push({ canal: CANAL, nivel: 'aviso', mencionar: !teste, teste,\n        titulo: `Token do Instagram @${c.conta} caduca em ${Math.floor(c.dias)} dias`,\n        descricao: 'A renovação automática ainda não o conseguiu prolongar (' + (c.acao || '?') + ').\\n\\n' + passos(c.conta, c.credencial),\n        campos: [{ nome: 'Caduca', valor: `${data(c.expira_em)}${c.estimado ? ' (estimada)' : ''}`, inline: true }],\n        links: LINK, rodape: 'n8n: renovar tokens do Instagram' });\n    }\n  }\n  const renovados = r.contas.filter((c) => c.ok && /^renovado/.test(c.acao || ''));\n  if (renovados.length || teste) {\n    avisos.push({ canal: CANAL, nivel: 'ok', mencionar: false, teste,\n      titulo: teste ? 'Tokens do Instagram verificados (sem renovar)' : `Tokens do Instagram renovados (${renovados.length})`,\n      campos: r.contas.map((c) => ({ nome: `@${c.conta || '?'}`,\n        valor: `${c.ok ? '✅' : '❌'} ${c.acao || c.erro || '?'}\\nVálido até ${data(c.expira_em)}${c.estimado ? ' (estimado)' : ''}` })),\n      rodape: 'n8n: renovar tokens do Instagram · o token novo fica na mesma credencial' });\n  }\n}\nreturn avisos.map((a) => ({ json: { aviso: a } }));\n"
+    }
+   },
+   {
+    "id": "3df02f60-3a78-582a-a658-a04e59a25e8e",
+    "name": "Enviar aviso (Discord)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     960,
+     0
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aviso",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.aviso) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000
+   }
+  ],
+  "connections": {
+   "Toda a segunda às 10:00": {
+    "main": [
+     [
+      {
+       "node": "Opções",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Executar à mão": {
+    "main": [
+     [
+      {
+       "node": "Opções",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Opções": {
+    "main": [
+     [
+      {
+       "node": "Renovar na sonda",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Renovar na sonda": {
+    "main": [
+     [
+      {
+       "node": "Decidir avisos",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Decidir avisos": {
+    "main": [
+     [
+      {
+       "node": "Enviar aviso (Discord)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "all",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner",
+   "errorWorkflow": "autoAvisarErros1"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]

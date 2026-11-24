@@ -1,0 +1,288 @@
+[
+ {
+  "id": "autoPrazos000001",
+  "name": "Lembretes do que caduca",
+  "active": false,
+  "nodes": [
+   {
+    "id": "9585b550-4ebe-5525-a37b-3bcf1665b698",
+    "name": "Todos os dias às 09:30",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     0,
+     -100
+    ],
+    "parameters": {
+     "rule": {
+      "interval": [
+       {
+        "field": "days",
+        "daysInterval": 1,
+        "triggerAtHour": 9,
+        "triggerAtMinute": 30
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "e1140673-d175-539c-90f3-cfbf8f80ad85",
+    "name": "Executar à mão",
+    "type": "n8n-nodes-base.manualTrigger",
+    "typeVersion": 1,
+    "position": [
+     0,
+     100
+    ],
+    "parameters": {}
+   },
+   {
+    "id": "a0b1104b-a5ab-5d73-8309-6b99edf91dcc",
+    "name": "Certificados TLS (sonda)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     240,
+     0
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "http://172.17.0.1:8791/certificados?hosts=example.com,n8n.example.com",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-sonda",
+      "name": "Sonda (X-Token)"
+     }
+    },
+    "alwaysOutputData": true,
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "0c383f6c-0be8-5f8d-b11b-29ab1de53800",
+    "name": "Tokens do Instagram (sonda)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     480,
+     0
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "http://172.17.0.1:8791/instagram/estado",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-sonda",
+      "name": "Sonda (X-Token)"
+     }
+    },
+    "alwaysOutputData": true,
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "01d0ff5d-3b40-5ecf-9b27-bb6b0923ebf0",
+    "name": "Túnel (sonda)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     720,
+     0
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "http://172.17.0.1:8791/tunel",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-sonda",
+      "name": "Sonda (X-Token)"
+     }
+    },
+    "alwaysOutputData": true,
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "155b2efe-66c2-54f7-af6c-d40ab2c35c5c",
+    "name": "Domínio (RDAP)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     960,
+     0
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "https://rdap.org/domain/example.com",
+     "options": {
+      "timeout": 30000
+     },
+     "sendHeaders": true,
+     "headerParameters": {
+      "parameters": [
+       {
+        "name": "Accept",
+        "value": "application/rdap+json"
+       }
+      ]
+     }
+    },
+    "alwaysOutputData": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "9cf56dd4-3edb-54ee-a66d-357ce49da767",
+    "name": "Juntar prazos e decidir",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1200,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// Junta todos os prazos e avisa só se algum caducar nos próximos LIMITE dias (ou se não consegui verificar algo).\n// Uma mensagem por dia, no máximo.\nconst LIMITE = 14;\nconst TESTE = false;   // em testes: LIMITE = 400 e TESTE = true mostra tudo o que é seguido\n// Prazos teus que nenhuma API sabe: { nome, expira_em: 'AAAA-MM-DD', nota }\nconst FIXOS = [\n  // { nome: 'Renovar o seguro do servidor', expira_em: '2027-03-01', nota: 'Exemplo: apaga ou muda.' },\n];\nconst agora = new Date();\nconst dias = (iso) => (new Date(iso) - agora) / 86400000;\nconst data = (iso) => new Date(iso).toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' });\nconst itens = [], falhas = [];\nconst erroDe = (j) => j.error ? String(j.error.message || JSON.stringify(j.error)).slice(0, 200) : null;\n\nconst cert = $('Certificados TLS (sonda)').first().json;\nif (erroDe(cert) || !Array.isArray(cert.certificados)) falhas.push(['Certificados TLS', erroDe(cert) || 'resposta inesperada da sonda']);\nelse for (const c of cert.certificados) {\n  if (c.erro) falhas.push([`Certificado ${c.host}`, c.erro]);\n  else itens.push({ nome: `Certificado TLS de ${c.host}`, expira_em: c.expira_em,\n    nota: `Emissor: ${c.emissor}. Normalmente renova-se sozinho ~30 dias antes; se chegou aqui, a renovação automática falhou.` });\n}\nconst ig = $('Tokens do Instagram (sonda)').first().json;\nif (erroDe(ig) || !Array.isArray(ig.contas)) falhas.push(['Tokens do Instagram', erroDe(ig) || 'resposta inesperada da sonda']);\nelse for (const c of ig.contas) {\n  if (c.ultimo_erro) falhas.push([`Token do Instagram @${c.conta}`, c.ultimo_erro]);\n  if (c.expira_em) itens.push({ nome: `Token do Instagram @${c.conta}`, expira_em: c.expira_em,\n    nota: (c.estimado ? 'Validade estimada (60 dias desde a última alteração da credencial). ' : '') + 'Renova-se sozinho à segunda às 10:00.' });\n}\nconst tun = $('Túnel (sonda)').first().json;\nif (tun.configurado !== false) {\n  if (erroDe(tun) || tun.erro) falhas.push(['Túnel', erroDe(tun) || tun.erro]);\n  else if (!tun.a_correr || !(tun.ligacoes > 0)) falhas.push(['Túnel', `estado ${tun.estado}, ligações prontas: ${tun.ligacoes ?? '?'}, reinícios: ${tun.reinicios}`]);\n}\nlet rd = $('Domínio (RDAP)').first().json;\nif (typeof rd.data === 'string') { try { rd = JSON.parse(rd.data); } catch (e) { /* fica como veio */ } }\nconst exp = (rd.events || []).find((e) => e.eventAction === 'expiration');\nif (erroDe(rd) || !exp) falhas.push(['Domínio example.com', erroDe(rd) || 'o RDAP não trouxe a data de expiração']);\nelse itens.push({ nome: 'Domínio example.com', expira_em: exp.eventDate, nota: 'Renovar no registo do domínio. Sem renovação, tudo o que está nele para.' });\nfor (const f of FIXOS) itens.push({ ...f, expira_em: new Date(f.expira_em + 'T09:00:00Z').toISOString() });\n\nconst perto = itens.map((x) => ({ ...x, dias: dias(x.expira_em) })).filter((x) => x.dias <= LIMITE).sort((a, b) => a.dias - b.dias);\nif (!perto.length && !falhas.length) return [];\nconst st = $getWorkflowStaticData('global');\nconst chave = agora.toISOString().slice(0, 10) + '|' + JSON.stringify([perto.map((x) => x.nome), falhas.map((f) => f[0])]);\nif (st.ultimo === chave && !TESTE) return [];   // já avisado hoje com o mesmo conteúdo\nst.ultimo = chave;\nconst urgente = perto.some((x) => x.dias <= 3);\nconst campos = perto.slice(0, 10).map((x) => ({\n  nome: `${x.dias < 0 ? '⛔' : x.dias <= 3 ? '🔴' : '🟡'} ${x.nome}`,\n  valor: `${x.dias < 0 ? 'Caducou a' : 'Caduca a'} **${data(x.expira_em)}** (${x.dias < 0 ? 'há ' + Math.ceil(-x.dias) : 'faltam ' + Math.floor(x.dias)} dias)\\n${x.nota || ''}` }));\nfor (const [n, m] of falhas.slice(0, 5)) campos.push({ nome: `⚠️ Não consegui verificar: ${n}`, valor: m });\nreturn [{ json: { aviso: {\n  canal: 'alertas', nivel: urgente || falhas.length ? 'erro' : 'aviso', mencionar: !TESTE, teste: TESTE,\n  titulo: perto.length ? `Prazos a caducar nos próximos ${LIMITE} dias: ${perto.length}` : 'Lembretes do que caduca: não consegui verificar tudo',\n  descricao: 'Verificação diária. Só aviso quando falta pouco; amanhã volto a avisar se ainda estiver por tratar.',\n  campos, rodape: 'n8n: lembretes do que caduca',\n} } }];\n"
+    }
+   },
+   {
+    "id": "35534650-7979-5323-9687-ab3d7622c584",
+    "name": "Enviar aviso (Discord)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     1440,
+     0
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aviso",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.aviso) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000
+   }
+  ],
+  "connections": {
+   "Todos os dias às 09:30": {
+    "main": [
+     [
+      {
+       "node": "Certificados TLS (sonda)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Executar à mão": {
+    "main": [
+     [
+      {
+       "node": "Certificados TLS (sonda)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Certificados TLS (sonda)": {
+    "main": [
+     [
+      {
+       "node": "Tokens do Instagram (sonda)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Tokens do Instagram (sonda)": {
+    "main": [
+     [
+      {
+       "node": "Túnel (sonda)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Túnel (sonda)": {
+    "main": [
+     [
+      {
+       "node": "Domínio (RDAP)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Domínio (RDAP)": {
+    "main": [
+     [
+      {
+       "node": "Juntar prazos e decidir",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Juntar prazos e decidir": {
+    "main": [
+     [
+      {
+       "node": "Enviar aviso (Discord)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "all",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner",
+   "errorWorkflow": "autoAvisarErros1"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]

@@ -1,0 +1,120 @@
+[
+ {
+  "id": "autoAvisarErros1",
+  "name": "Avisar erros dos workflows → Discord",
+  "active": false,
+  "nodes": [
+   {
+    "id": "8d0e3148-b92f-5167-86f0-27a6eeb786fc",
+    "name": "Quando um workflow falha",
+    "type": "n8n-nodes-base.errorTrigger",
+    "typeVersion": 1,
+    "position": [
+     0,
+     0
+    ],
+    "parameters": {}
+   },
+   {
+    "id": "7802016f-5b56-5274-83b8-930b4dae9fb6",
+    "name": "Teste à mão (erro simulado)",
+    "type": "n8n-nodes-base.manualTrigger",
+    "typeVersion": 1,
+    "position": [
+     0,
+     200
+    ],
+    "parameters": {}
+   },
+   {
+    "id": "c2e53d9b-344b-57ca-8073-e45a47872ceb",
+    "name": "Preparar aviso do erro",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     240,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// Recebe o erro de qualquer workflow (Definições → Error workflow) e avisa no Discord.\n// O mesmo erro (workflow + nó + mensagem) só é avisado de 6 em 6 horas, para não encher o canal.\n// Sem dados (carregaste em «Execute workflow» à mão): simula um erro marcado [teste].\nconst e = $json.workflow ? $json : { workflow: { id: 'teste', name: '[teste] workflow de exemplo' },\n  execution: { id: null, mode: 'teste', lastNodeExecuted: 'Nó de exemplo', error: { message: '[teste] erro simulado' } } };\nconst wf = e.workflow || {};\nconst ex = e.execution || {};\nconst erro = ex.error || (e.trigger && e.trigger.error) || {};\nconst no = (erro.node && erro.node.name) || ex.lastNodeExecuted || '?';\nconst msg = String(erro.message || erro.description || 'sem mensagem').slice(0, 900);\nconst st = $getWorkflowStaticData('global');\nst.vistos = st.vistos || {};\nconst agora = Date.now();\nfor (const [k, t] of Object.entries(st.vistos)) if (agora - t > 24 * 3600e3) delete st.vistos[k];\nconst chave = `${wf.id}|${no}|${msg.slice(0, 120)}`;\nif (st.vistos[chave] && agora - st.vistos[chave] < 6 * 3600e3) return [];\nst.vistos[chave] = agora;\nconst teste = /\\[teste\\]/i.test(msg) || /\\[teste\\]/i.test(wf.name || '');\nreturn [{ json: { aviso: {\n  canal: 'alertas', nivel: 'erro', mencionar: !teste, teste,\n  titulo: `O workflow «${wf.name || wf.id}» falhou`,\n  descricao: 'Abre a execução no n8n (Executions) para ver o detalhe. Se era um aviso ou uma publicação, ficou por fazer.',\n  campos: [\n    { nome: 'Nó', valor: no, inline: true },\n    { nome: 'Modo', valor: ex.mode || '?', inline: true },\n    { nome: 'Erro', valor: msg },\n    { nome: 'Execução', valor: ex.id ? `${ex.id} ${ex.url || ''}` : 'não guardada' },\n  ],\n  rodape: 'n8n: avisar erros · o mesmo erro só volta a ser avisado ao fim de 6 h',\n} } }];\n"
+    }
+   },
+   {
+    "id": "28a79148-861c-5f91-a3cd-df4e52d61fb4",
+    "name": "Enviar aviso (Discord)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     480,
+     0
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aviso",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.aviso) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000
+   }
+  ],
+  "connections": {
+   "Quando um workflow falha": {
+    "main": [
+     [
+      {
+       "node": "Preparar aviso do erro",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Teste à mão (erro simulado)": {
+    "main": [
+     [
+      {
+       "node": "Preparar aviso do erro",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Preparar aviso do erro": {
+    "main": [
+     [
+      {
+       "node": "Enviar aviso (Discord)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "all",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]

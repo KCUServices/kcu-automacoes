@@ -1,0 +1,9 @@
+{
+  "name": "recetor-webhooks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node teste.mjs",
+    "deploy": "wrangler deploy"
+  }
+}

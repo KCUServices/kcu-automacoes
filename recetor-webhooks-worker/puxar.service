@@ -1,0 +1,16 @@
+[Unit]
+Description=recetor-webhooks: vai buscar os webhooks em fila no Worker e entrega-os em casa
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+StateDirectory=recetor-webhooks
+EnvironmentFile=/etc/recetor-webhooks/recetor.env
+ExecStart=/usr/bin/python3 -I /opt/recetor-webhooks/puxar.py
+TimeoutStartSec=600
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes

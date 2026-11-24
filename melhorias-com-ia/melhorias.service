@@ -1,0 +1,13 @@
+# Alternativa Linux a tarefa agendada do Windows (servico de utilizador: o gh e o claude usam o TEU login).
+# Instalar:  mkdir -p ~/.config/systemd/user && cp melhorias.service melhorias.timer ~/.config/systemd/user/
+#            muda o WorkingDirectory abaixo e poe o token em ~/.config/melhorias.env (APROVACOES_TOKEN=..., chmod 600)
+#            systemctl --user daemon-reload && systemctl --user enable --now melhorias.timer
+[Unit]
+Description=Melhorias com IA (uma volta)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/melhorias-com-ia
+EnvironmentFile=%h/.config/melhorias.env
+ExecStart=/usr/bin/python3 %h/melhorias-com-ia/melhorias.py
+TimeoutStartSec=1h

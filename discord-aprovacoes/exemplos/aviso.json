@@ -1,0 +1,14 @@
+{
+  "canal": "alertas",
+  "titulo": "Backup semanal concluído",
+  "descricao": "3 máquinas copiadas sem erros.",
+  "nivel": "ok",
+  "campos": [
+    {"nome": "Duração", "valor": "12 min", "inline": true},
+    {"nome": "Tamanho", "valor": "41 GB", "inline": true}
+  ],
+  "links": [{"texto": "Abrir o painel", "url": "https://example.com/backups"}],
+  "mencionar": false,
+  "teste": true,
+  "rodape": "exemplo de aviso"
+}

@@ -1,0 +1,26 @@
+# segredos e configuracao de cada um
+.env
+*.env
+!.env.exemplo
+config.json
+padroes_privados.txt
+
+# estado, bases de dados e logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.log.1
+logs/
+estado.json
+.estado.json
+volta.lock
+trabalho/
+melhorias-com-ia/known_hosts
+
+# pastas de trabalho
+publicar/
+.wrangler/
+node_modules/
+__pycache__/
+*.pyc

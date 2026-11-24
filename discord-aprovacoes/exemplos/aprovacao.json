@@ -1,0 +1,16 @@
+{
+  "id": "apr-exemplo-0001",
+  "origem": "exemplo",
+  "canal": "aprovacoes",
+  "titulo": "Reiniciar o servidor de jogos?",
+  "descricao": "Há uma atualização pendente. Ninguém está ligado há 2 horas.",
+  "campos": [{"nome": "Versão nova", "valor": "1.21.4", "inline": true}],
+  "botoes": [
+    {"id": "aprovar", "rotulo": "Reiniciar", "emoji": "✅", "estilo": "sucesso", "resposta": "Ok, vou reiniciar."},
+    {"id": "recusar", "rotulo": "Agora não", "emoji": "❌", "estilo": "perigo"}
+  ],
+  "ligacoes": [{"rotulo": "Notas da versão", "url": "https://example.com/notas"}],
+  "contexto": {"servidor": "jogos-1"},
+  "mencionar": true,
+  "teste": true
+}

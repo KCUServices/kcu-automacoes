@@ -1,0 +1,18 @@
+[Unit]
+Description=Sonda do n8n (tokens do Instagram, certificados TLS, tunel)
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /opt/n8n-sonda/sonda.py
+Restart=always
+RestartSec=10
+# precisa de root: docker exec (CLI do n8n) e nsenter (metricas do tunel)
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

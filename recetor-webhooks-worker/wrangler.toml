@@ -1,0 +1,28 @@
+# Configuracao do Worker. Antes de publicar:
+#   npx wrangler kv namespace create FILA      -> copia o id para baixo
+#   npx wrangler secret put TOKEN_FILA         -> 32+ caracteres (o mesmo RECETOR_TOKEN da casa)
+#   npx wrangler secret put SEGREDO_WHOP       -> o segredo do webhook (um por fonte de FONTES)
+#   npx wrangler deploy
+name = "recetor-webhooks"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+# fontes aceites em POST /w/<fonte>, separadas por virgulas (a-z, 0-9 e -)
+FONTES = "whop"
+
+[[kv_namespaces]]
+binding = "FILA"
+id = "SUBSTITUI-PELO-ID-DO-TEU-KV"
+
+# Opcional: limite de pedidos por IP (120 por minuto). Se o teu plano ou a tua versao do wrangler nao aceitarem,
+# apaga este bloco: o Worker funciona sem ele.
+[[ratelimits]]
+name = "LIMITE"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+[observability]
+enabled = false

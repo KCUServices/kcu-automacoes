@@ -1,0 +1,781 @@
+[
+ {
+  "id": "autoInstaEntrada",
+  "name": "Instagram: entrada e aprovação",
+  "active": false,
+  "nodes": [
+   {
+    "id": "47ebb4e5-c6dd-5ff0-a9d0-72f5d4028921",
+    "name": "Recebe da pasta (nova imagem)",
+    "type": "n8n-nodes-base.webhook",
+    "typeVersion": 2,
+    "position": [
+     0,
+     0
+    ],
+    "parameters": {
+     "httpMethod": "POST",
+     "path": "publicar-entrada",
+     "responseMode": "responseNode",
+     "options": {},
+     "authentication": "headerAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-pasta",
+      "name": "Pasta de publicar (X-Token)"
+     }
+    },
+    "webhookId": "5c30ae8c-c39b-5955-979c-2f7407c8a828"
+   },
+   {
+    "id": "95d1d356-85fe-567c-a012-ec939b2f1cd2",
+    "name": "Que pedido?",
+    "type": "n8n-nodes-base.switch",
+    "typeVersion": 3.2,
+    "position": [
+     220,
+     0
+    ],
+    "parameters": {
+     "rules": {
+      "values": [
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "d5c628dd-16d1-5e19-908b-8ee540ef8c23",
+           "leftValue": "={{ ($json.body || {}).acao }}",
+           "rightValue": "retirar",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "retirar"
+       },
+       {
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "loose",
+          "version": 2
+         },
+         "conditions": [
+          {
+           "id": "10dd900f-0d18-58f2-935c-bf4f2e37ba72",
+           "leftValue": "={{ ($json.body || {}).acao }}",
+           "rightValue": "erro",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           }
+          }
+         ],
+         "combinator": "and"
+        },
+        "renameOutput": true,
+        "outputKey": "erro"
+       }
+      ]
+     },
+     "options": {
+      "fallbackOutput": "extra",
+      "renameFallbackOutput": "nova imagem"
+     }
+    }
+   },
+   {
+    "id": "c241423e-c3de-5b8c-9b70-c9d5a2344715",
+    "name": "Validar imagem e legenda",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     440,
+     120
+    ],
+    "parameters": {
+     "jsCode": "// Valida o que a pasta mandou (imagem + legenda + hora). Nada aqui publica nem sai para fora.\nconst b = $json.body || {};\nconst motivos = [], avisos = [];\nconst nome = String(b.nome || 'imagem.jpg').replace(/[\\\\/]/g, '_').slice(0, 120);\nconst base = nome.replace(/\\.(jpe?g|png)$/i, '');\nconst pubId = String(b.pub_id || '');\nif (!/^[a-f0-9]{12,32}$/.test(pubId)) motivos.push('pedido sem identificador válido');\n\n// ---- imagem: formato, tamanho e proporção (lidos do próprio ficheiro)\nlet buf = null, largura = 0, altura = 0, formato = '?';\ntry { buf = Buffer.from(String(b.imagem_b64 || ''), 'base64'); } catch (e) { buf = null; }\nif (!buf || buf.length < 100) motivos.push('imagem vazia ou ilegível');\nelse {\n  if (buf.length > 8 * 1024 * 1024) motivos.push(`a imagem tem ${(buf.length / 1048576).toFixed(1)} MB (máximo 8 MB)`);\n  if (buf[0] === 0xFF && buf[1] === 0xD8) {\n    formato = 'JPEG';\n    let i = 2;\n    while (i + 9 < buf.length) {\n      if (buf[i] !== 0xFF) { i++; continue; }\n      const m = buf[i + 1];\n      if (m === 0xFF) { i++; continue; }\n      if (m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { i += 2; continue; }\n      const len = buf.readUInt16BE(i + 2);\n      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {\n        altura = buf.readUInt16BE(i + 5); largura = buf.readUInt16BE(i + 7); break;\n      }\n      i += 2 + len;\n    }\n  } else if (buf.slice(0, 8).toString('hex') === '89504e470d0a1a0a') {\n    formato = 'PNG'; largura = buf.readUInt32BE(16); altura = buf.readUInt32BE(20);\n    motivos.push('chegou em PNG: o Instagram só aceita JPEG (o script da pasta converte sozinho; se chegou assim, a conversão falhou)');\n  } else motivos.push('formato não suportado (só JPEG ou PNG)');\n  if (formato !== '?' && (!largura || !altura)) motivos.push('não consegui ler as dimensões da imagem');\n}\nconst proporcao = largura && altura ? largura / altura : 0;\nif (proporcao) {\n  if (proporcao < 0.8 - 0.005 || proporcao > 1.91 + 0.005)\n    motivos.push(`proporção ${largura}×${altura} fora do que o Instagram aceita (entre 4:5 e 1,91:1)`);\n  if (largura < 320) motivos.push(`largura ${largura} px: o mínimo é 320 px`);\n  else if (largura < 1080) avisos.push(`largura ${largura} px (o Instagram recomenda 1080 px)`);\n}\n\n// ---- legenda\nconst legenda = String(b.legenda || '').replace(/\\r\\n/g, '\\n').replace(/^﻿/, '').trim();\nif (!legenda) motivos.push(`a legenda está vazia (${base}.txt sem texto)`);\nif (legenda.length > 2200) motivos.push(`a legenda tem ${legenda.length} caracteres (máximo 2200)`);\nconst hashtags = legenda.match(/#[\\p{L}\\p{N}_]+/gu) || [];\nif (hashtags.length > 30) motivos.push(`a legenda tem ${hashtags.length} hashtags (máximo 30)`);\nconst mencoes = legenda.match(/(^|\\s)@[\\w.]+/g) || [];\nif (mencoes.length > 20) motivos.push(`a legenda tem ${mencoes.length} menções @ (máximo 20)`);\n\n// ---- privacidade: o que nunca pode ir numa publicação. ACRESCENTA os teus nomes e domínios em NOMES.\nconst NOMES = [];   // ex.: ['o-meu-nome', 'o-meu-apelido']\nconst DOMINIO_MARCA = 'example.com';   // e-mails deste domínio são permitidos\nconst PRIVADO = [\n  [new RegExp('[\\\\w.+-]+@(?!' + DOMINIO_MARCA.replace(/\\./g, '\\\\.') + ')[\\\\w-]+\\\\.[\\\\w.]+', 'i'), 'um e-mail que não é da marca'],\n  [/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/, 'um endereço IP'],\n  [/(?:\\+?\\d[ -]?){9,}/, 'um número de telefone'],\n  [/ts\\.net|tailscale|localhost|\\.lan\\b|\\.local\\b/i, 'um endereço da rede de casa'],\n];\nif (NOMES.length) PRIVADO.push([new RegExp(NOMES.map((n) => n.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|'), 'i'), 'um nome pessoal']);\nfor (const [re, o] of PRIVADO) if (re.test(legenda)) motivos.push(`a legenda parece ter ${o}`);\n\n// ---- hora marcada (opcional), na hora local do fuso do workflow\nlet quandoIso = null, quandoPt = null;\nconst qt = String(b.quando || '').trim();\nif (qt) {\n  const fmts = ['yyyy-MM-dd HH:mm', \"yyyy-MM-dd'T'HH:mm\", 'yyyy-MM-dd H:mm', 'dd/MM/yyyy HH:mm', 'd/M/yyyy H:mm',\n                'dd-MM-yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'dd/MM/yyyy HH:mm:ss'];\n  let dt = null;\n  for (const f of fmts) { const d = DateTime.fromFormat(qt, f, { zone: 'Europe/Lisbon' }); if (d.isValid) { dt = d; break; } }\n  if (!dt) motivos.push(`não percebi a hora em ${base}.quando.txt («${qt.slice(0, 40)}»): escreve por exemplo 2026-11-30 18:30`);\n  else {\n    const agora = DateTime.now().setZone('Europe/Lisbon');\n    if (dt < agora.plus({ minutes: 10 })) motivos.push(`a hora marcada (${dt.toFormat('dd/MM/yyyy HH:mm')}) já passou ou é daqui a menos de 10 min`);\n    else if (dt > agora.plus({ days: 60 })) motivos.push(`a hora marcada (${dt.toFormat('dd/MM/yyyy HH:mm')}) é daqui a mais de 60 dias`);\n    quandoIso = dt.toUTC().toISO();\n    quandoPt = dt.setLocale('pt-PT').toFormat(\"cccc, dd/MM/yyyy 'às' HH:mm\");\n  }\n}\n\nreturn { json: {\n  valido: motivos.length === 0, motivos, avisos, pub_id: pubId, nome, base, formato, largura, altura,\n  proporcao: proporcao ? Number(proporcao.toFixed(3)) : 0, bytes: buf ? buf.length : 0,\n  legenda, caracteres: legenda.length, hashtags: hashtags.length, quando_iso: quandoIso, quando_pt: quandoPt,\n  teste: b.teste === true, convertido: b.convertido || null,\n} };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "3f131a1a-61b9-5cfe-929d-f7a25f8aeacd",
+    "name": "É válida?",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [
+     660,
+     120
+    ],
+    "parameters": {
+     "conditions": {
+      "options": {
+       "caseSensitive": true,
+       "leftValue": "",
+       "typeValidation": "loose",
+       "version": 2
+      },
+      "conditions": [
+       {
+        "id": "eee20b3a-afcf-519a-94e0-e80036cd6695",
+        "leftValue": "={{ $json.valido }}",
+        "rightValue": true,
+        "operator": {
+         "type": "boolean",
+         "operation": "true",
+         "singleValue": true
+        }
+       }
+      ],
+      "combinator": "and"
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "a482ac02-e2f5-5723-ba59-29d5e95e55f7",
+    "name": "Montar aprovação",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     880,
+     40
+    ],
+    "parameters": {
+     "jsCode": "// Pedido de aprovação: pré-visualização, legenda e os botões. Só os aprovadores podem carregar.\nconst v = $json;\nconst b = $('Recebe da pasta (nova imagem)').item.json.body;\nconst aid = 'apr-ig-' + v.pub_id;\nconst kb = v.bytes > 1048576 ? (v.bytes / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.round(v.bytes / 1024) + ' KB';\nconst botoes = [{ id: 'publicar', rotulo: 'Publicar agora', emoji: '✅', estilo: 'sucesso' }];\nif (v.quando_iso) botoes.push({ id: 'agendar', rotulo: 'Publicar à hora marcada', emoji: '🕒', estilo: 'primario' });\nbotoes.push({ id: 'editar', rotulo: 'Editar', emoji: '✏️', estilo: 'secundario',\n  resposta: `✏️ Para editar: muda \\`${v.base}.txt\\` (legenda) ou a imagem \\`${v.nome}\\` na pasta e grava. Chega aqui uma aprovação nova; esta fica fechada.` });\nbotoes.push({ id: 'nao', rotulo: 'Não publicar', emoji: '❌', estilo: 'perigo' });\nconst campos = [\n  { nome: 'Conta', valor: 'Instagram **@a-tua-conta**', inline: true },\n  { nome: 'Imagem', valor: `${v.nome} · ${v.largura}×${v.altura} · ${kb}` + (v.convertido ? ` · ${v.convertido}` : ''), inline: true },\n  { nome: 'Legenda', valor: `${v.caracteres}/2200 caracteres · ${v.hashtags}/30 hashtags`, inline: true },\n  { nome: 'Quando', valor: v.quando_iso ? `🕒 ${v.quando_pt} — se carregares em «Publicar à hora marcada»` : 'Sem hora marcada: «Publicar agora» publica logo.' },\n];\nif (v.avisos.length) campos.push({ nome: '⚠️ Avisos', valor: v.avisos.map((a) => '• ' + a).join('\\n') });\nreturn { json: { corpo: {\n  id: aid, origem: 'n8n-instagram', canal: 'aprovacoes', fase: 'pendente', mencionar: true, teste: v.teste,\n  titulo: `📸 Publicar no Instagram @a-tua-conta — ${v.nome}`,\n  descricao: v.legenda.length > 3900 ? v.legenda.slice(0, 3899) + '…' : v.legenda,\n  campos, botoes, callback: 'http://10.0.0.20:5678/webhook/publicar-decisao',\n  contexto: { aid, pub_id: v.pub_id, nome: v.nome, base: v.base, legenda: v.legenda, quando_iso: v.quando_iso,\n              quando_pt: v.quando_pt, teste: v.teste },\n  rodape: 'n8n · Instagram', imagem_b64: b.imagem_b64,\n} } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "2fa58b47-61c9-5e79-aa65-5bc895034b2a",
+    "name": "Montar aviso (inválida)",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     880,
+     220
+    ],
+    "parameters": {
+     "jsCode": "// A imagem não passa nas regras: aviso sem botões (nada é publicado). O script da pasta escreve o motivo ao lado do ficheiro.\nconst v = $json;\nconst b = $('Recebe da pasta (nova imagem)').item.json.body;\nconst temImagem = v.formato === 'JPEG' && v.bytes <= 8 * 1024 * 1024;\nreturn { json: { corpo: {\n  id: 'apr-ig-' + (v.pub_id || 'x'), origem: 'n8n-instagram', canal: 'aprovacoes', fase: 'invalido', mencionar: true,\n  teste: v.teste, cor: 'laranja', titulo: `⚠️ Não dá para publicar ${v.nome}`,\n  descricao: v.motivos.map((m) => '• ' + m).join('\\n') + `\\n\\nCorrige na pasta e grava: o script volta a mandar sozinho. O motivo também fica em \\`${v.base}.erro.txt\\`.`,\n  campos: v.legenda ? [{ nome: 'Legenda recebida', valor: v.legenda.slice(0, 1000) }] : [],\n  contexto: { pub_id: v.pub_id, nome: v.nome, base: v.base, motivos: v.motivos, teste: v.teste },\n  resultado: '⚠️ Inválida: nada foi publicado.', rodape: 'n8n · Instagram',\n  imagem_b64: temImagem ? b.imagem_b64 : undefined,\n} } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "4a0c6bd5-d59a-5ad9-99bf-aaccc28bf496",
+    "name": "Enviar ao Discord",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     1100,
+     120
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aprovacao",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.corpo) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "a8d32adc-1113-5434-bc1c-ad71297b4e77",
+    "name": "Resposta à pasta",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     1320,
+     120
+    ],
+    "parameters": {
+     "jsCode": "const v = $('Validar imagem e legenda').item.json;\nconst r = $json;\nconst ok = r.statusCode === 200 && r.body && r.body.id;\nreturn { json: { ok: !!ok, estado: v.valido ? 'pendente' : 'invalido', motivos: v.motivos, avisos: v.avisos,\n  aprovacao: ok ? r.body.id : null, erro: ok ? null : String(JSON.stringify(r.body || r.error || r).slice(0, 300)) } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "338811ab-4370-54b2-b884-24872f987b3a",
+    "name": "Responder à pasta",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     1540,
+     120
+    ],
+    "parameters": {
+     "respondWith": "json",
+     "responseBody": "={{ JSON.stringify($json) }}",
+     "options": {
+      "responseCode": "={{ $json.ok ? 200 : 502 }}"
+     }
+    }
+   },
+   {
+    "id": "4f0b3c10-220f-5b1b-bebb-e7c70bdbcf44",
+    "name": "Qual retirar?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     440,
+     -140
+    ],
+    "parameters": {
+     "jsCode": "const b = $json.body || {};\nconst pubId = String(b.pub_id || '');\nif (!/^[a-f0-9]{12,32}$/.test(pubId)) return { json: { aid: 'apr-ig-invalido', motivo: 'x' } };\nreturn { json: { aid: 'apr-ig-' + pubId, motivo: b.motivo === 'substituido' ? 'substituido' : 'retirado' } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "61df486f-1b08-51dc-8ea7-37da2d702a09",
+    "name": "Ver aprovação",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     660,
+     -140
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "=http://10.0.0.30:8790/aprovacao/{{ $json.aid }}",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "4a60f4e7-b91d-598c-9157-cc701765bd6d",
+    "name": "Pode fechar?",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     880,
+     -140
+    ],
+    "parameters": {
+     "jsCode": "// Só se fecha o que ainda está à espera. O que já foi publicado nunca é mexido.\nconst q = $('Qual retirar?').item.json;\nconst a = $json.statusCode === 200 ? $json.body : null;\nconst sub = q.motivo === 'substituido';\nreturn { json: { fechar: !!a && a.estado === 'pendente', aid: q.aid, corpo: { estado: 'concluido', fase: q.motivo, apagar_imagem: true,\n  resultado: sub ? '🔁 Substituída: o ficheiro mudou e chegou uma aprovação nova.' : '🗑️ Retirada: o ficheiro saiu da pasta. Nada foi publicado.' } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "dc74bd97-da97-5122-88ef-6d24204c88c5",
+    "name": "Fechar?",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [
+     1100,
+     -140
+    ],
+    "parameters": {
+     "conditions": {
+      "options": {
+       "caseSensitive": true,
+       "leftValue": "",
+       "typeValidation": "loose",
+       "version": 2
+      },
+      "conditions": [
+       {
+        "id": "63794a2e-dd65-5e5c-8e38-017f0a86297b",
+        "leftValue": "={{ $json.fechar }}",
+        "rightValue": true,
+        "operator": {
+         "type": "boolean",
+         "operation": "true",
+         "singleValue": true
+        }
+       }
+      ],
+      "combinator": "and"
+     },
+     "options": {}
+    }
+   },
+   {
+    "id": "ae77c95c-66f8-55e8-a77f-d1a76a00abbc",
+    "name": "Fechar aprovação antiga",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     1320,
+     -200
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "=http://10.0.0.30:8790/aprovacao/{{ $json.aid }}/atualizar",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.corpo) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "1d175f1a-20fb-5035-80a0-3d4ce7c0657e",
+    "name": "Responder à pasta (retirar)",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     1540,
+     -140
+    ],
+    "parameters": {
+     "respondWith": "json",
+     "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+     "options": {
+      "responseCode": 200
+     }
+    }
+   },
+   {
+    "id": "fef1e662-f576-5ee6-a5fe-5f152ebc7e1a",
+    "name": "Montar aviso (erro na pasta)",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     440,
+     -300
+    ],
+    "parameters": {
+     "jsCode": "const b = $json.body || {};\nreturn { json: { aviso: { canal: 'alertas', nivel: 'erro', mencionar: true,\n  titulo: 'O script da pasta de publicar falhou',\n  descricao: '```\\n' + String(b.erro || '?').slice(0, 1500) + '\\n```\\nNada foi publicado. Vê o log do script.',\n  rodape: 'n8n · Instagram' } } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "45ab4994-6e10-5b57-b484-c53dd91a7141",
+    "name": "Avisar erro da pasta",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     660,
+     -300
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aviso",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.aviso) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "485d31f8-aa69-52ff-b730-8041e914ceb0",
+    "name": "Responder à pasta (erro)",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     880,
+     -300
+    ],
+    "parameters": {
+     "respondWith": "json",
+     "responseBody": "={{ JSON.stringify({ ok: $json.statusCode === 200 }) }}",
+     "options": {
+      "responseCode": 200
+     }
+    }
+   },
+   {
+    "id": "e228d540-dc73-529f-9cd1-56045fc599c1",
+    "name": "Pasta pergunta o estado",
+    "type": "n8n-nodes-base.webhook",
+    "typeVersion": 2,
+    "position": [
+     0,
+     420
+    ],
+    "parameters": {
+     "httpMethod": "GET",
+     "path": "publicar-estado",
+     "responseMode": "responseNode",
+     "options": {},
+     "authentication": "headerAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-pasta",
+      "name": "Pasta de publicar (X-Token)"
+     }
+    },
+    "webhookId": "eb1fe61a-c916-55bc-8f27-46cb8f7da228"
+   },
+   {
+    "id": "d26881a9-dae9-53c6-8937-fdd51ef7a396",
+    "name": "Listar aprovações",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     220,
+     420
+    ],
+    "parameters": {
+     "method": "GET",
+     "url": "=http://10.0.0.30:8790/aprovacoes?origem=n8n-instagram&desde={{ Math.floor(Date.now() / 1000) - 60 * 86400 }}",
+     "options": {
+      "timeout": 60000,
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true
+       }
+      }
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "f79ec8f5-e009-5865-b245-1980e225234b",
+    "name": "Estado para a pasta",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     440,
+     420
+    ],
+    "parameters": {
+     "jsCode": "const r = $json;\nconst lista = Array.isArray(r.body) ? r.body : [];\nreturn { json: { ok: r.statusCode === 200, publicacoes: lista.map((a) => ({\n  aid: a.id, pub_id: (a.contexto || {}).pub_id || null, fase: a.fase, estado: a.estado,\n  link: (a.contexto || {}).link || null, resultado: a.resultado, motivos: (a.contexto || {}).motivos || null })) } };\n",
+     "mode": "runOnceForEachItem"
+    }
+   },
+   {
+    "id": "f861ed7e-28cf-5c42-81af-d889664c05ee",
+    "name": "Responder estado à pasta",
+    "type": "n8n-nodes-base.respondToWebhook",
+    "typeVersion": 1.1,
+    "position": [
+     660,
+     420
+    ],
+    "parameters": {
+     "respondWith": "json",
+     "responseBody": "={{ JSON.stringify($json) }}",
+     "options": {
+      "responseCode": "={{ $json.ok ? 200 : 502 }}"
+     }
+    }
+   }
+  ],
+  "connections": {
+   "Recebe da pasta (nova imagem)": {
+    "main": [
+     [
+      {
+       "node": "Que pedido?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Que pedido?": {
+    "main": [
+     [
+      {
+       "node": "Qual retirar?",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Montar aviso (erro na pasta)",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Validar imagem e legenda",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Validar imagem e legenda": {
+    "main": [
+     [
+      {
+       "node": "É válida?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "É válida?": {
+    "main": [
+     [
+      {
+       "node": "Montar aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Montar aviso (inválida)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Montar aprovação": {
+    "main": [
+     [
+      {
+       "node": "Enviar ao Discord",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Montar aviso (inválida)": {
+    "main": [
+     [
+      {
+       "node": "Enviar ao Discord",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Enviar ao Discord": {
+    "main": [
+     [
+      {
+       "node": "Resposta à pasta",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Resposta à pasta": {
+    "main": [
+     [
+      {
+       "node": "Responder à pasta",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Qual retirar?": {
+    "main": [
+     [
+      {
+       "node": "Ver aprovação",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Ver aprovação": {
+    "main": [
+     [
+      {
+       "node": "Pode fechar?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Pode fechar?": {
+    "main": [
+     [
+      {
+       "node": "Fechar?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fechar?": {
+    "main": [
+     [
+      {
+       "node": "Fechar aprovação antiga",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Responder à pasta (retirar)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fechar aprovação antiga": {
+    "main": [
+     [
+      {
+       "node": "Responder à pasta (retirar)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Montar aviso (erro na pasta)": {
+    "main": [
+     [
+      {
+       "node": "Avisar erro da pasta",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Avisar erro da pasta": {
+    "main": [
+     [
+      {
+       "node": "Responder à pasta (erro)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Pasta pergunta o estado": {
+    "main": [
+     [
+      {
+       "node": "Listar aprovações",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Listar aprovações": {
+    "main": [
+     [
+      {
+       "node": "Estado para a pasta",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Estado para a pasta": {
+    "main": [
+     [
+      {
+       "node": "Responder estado à pasta",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "all",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner",
+   "errorWorkflow": "autoAvisarErros1"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]

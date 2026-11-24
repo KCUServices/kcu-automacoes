@@ -1,0 +1,207 @@
+[
+ {
+  "id": "autoVigiaUptime1",
+  "name": "Vigia do que é público (uptime)",
+  "active": false,
+  "nodes": [
+   {
+    "id": "7a92e209-1bda-5da6-b7a4-5d3e3855ffe0",
+    "name": "De 5 em 5 minutos",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     0,
+     -100
+    ],
+    "parameters": {
+     "rule": {
+      "interval": [
+       {
+        "field": "minutes",
+        "minutesInterval": 5
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "fdbae7c5-4c06-5828-8794-89577e4249fd",
+    "name": "Executar à mão",
+    "type": "n8n-nodes-base.manualTrigger",
+    "typeVersion": 1,
+    "position": [
+     0,
+     100
+    ],
+    "parameters": {}
+   },
+   {
+    "id": "7b813b63-bd82-54b3-83c3-90b9a1eccba5",
+    "name": "Escolher o que testar agora",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     240,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// O que vigiar. Para acrescentar: copia uma linha (id único, url, e «texto» que tem de aparecer na página\n// ou «exato» se a resposta inteira tem de ser igual). cada_min = de quantos em quantos minutos.\nconst TESTE = false;   // true só em testes: os avisos saem marcados [teste]\nconst ALVOS = [\n  {\n    \"id\": \"site\",\n    \"nome\": \"O meu site\",\n    \"url\": \"https://example.com/\",\n    \"texto\": \"Example Domain\",\n    \"cada_min\": 5\n  },\n  {\n    \"id\": \"api\",\n    \"nome\": \"API pública (saúde)\",\n    \"url\": \"https://example.com/saude\",\n    \"exato\": \"ok\",\n    \"cada_min\": 5\n  },\n  {\n    \"id\": \"recetor\",\n    \"nome\": \"Recetor de webhooks (Worker)\",\n    \"url\": \"https://recetor-webhooks.a-tua-conta.workers.dev/saude\",\n    \"exato\": \"ok\",\n    \"cada_min\": 15\n  }\n];\nconst st = $getWorkflowStaticData('global');\nst.ultimo = st.ultimo || {};\nconst agora = Date.now();\nconst saida = [];\nfor (const a of ALVOS) {\n  if (agora - (st.ultimo[a.id] || 0) < a.cada_min * 60000 - 60000) continue;   // ainda não é a vez deste\n  st.ultimo[a.id] = agora;\n  saida.push({ json: { ...a, teste: TESTE } });\n}\nreturn saida;\n"
+    }
+   },
+   {
+    "id": "e1ec7748-fac4-51fb-8596-337a1ad62c72",
+    "name": "Pedir a página",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     480,
+     0
+    ],
+    "parameters": {
+     "url": "={{ $json.url }}",
+     "sendHeaders": true,
+     "headerParameters": {
+      "parameters": [
+       {
+        "name": "User-Agent",
+        "value": "Mozilla/5.0 (compatible; vigia-n8n/1.0)"
+       },
+       {
+        "name": "Cache-Control",
+        "value": "no-cache"
+       }
+      ]
+     },
+     "options": {
+      "timeout": 20000,
+      "redirect": {
+       "redirect": {
+        "maxRedirects": 5
+       }
+      },
+      "response": {
+       "response": {
+        "fullResponse": true,
+        "neverError": true,
+        "responseFormat": "text"
+       }
+      }
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "id": "77ccddea-4dab-5801-9eb0-a3c260d6819b",
+    "name": "Avaliar e decidir avisos",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     720,
+     0
+    ],
+    "parameters": {
+     "jsCode": "// 2 falhas seguidas = aviso «em baixo» (com menção); quando volta a responder = aviso «voltou». Nada pelo meio.\nconst st = $getWorkflowStaticData('global');\nst.alvos = st.alvos || {};\nconst avisos = [];\nconst agora = new Date();\nconst dur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };\nconst hora = (d) => new Date(d).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' });\n$input.all().forEach((it, i) => {\n  const a = $('Escolher o que testar agora').itemMatching(i).json;\n  const j = it.json || {};\n  let ok = false, motivo = '';\n  if (j.error) {\n    motivo = 'sem resposta: ' + String(j.error.message || j.error.description || JSON.stringify(j.error)).slice(0, 200);\n  } else {\n    const corpo = String(j.body ?? j.data ?? '');\n    if (j.statusCode !== 200) motivo = `respondeu HTTP ${j.statusCode} (esperado 200)`;\n    else if (a.exato ? corpo.trim() !== a.exato : !corpo.toLowerCase().includes(String(a.texto).toLowerCase()))\n      motivo = a.exato ? `respondeu 200 mas não «${a.exato}»` : `respondeu 200 mas sem o texto «${a.texto}»`;\n    else ok = true;\n  }\n  const s = st.alvos[a.id] || { falhas: 0, em_baixo: false };\n  if (!ok) {\n    s.falhas = (s.falhas || 0) + 1;\n    s.motivo = motivo;\n    s.desde = s.desde || agora.toISOString();\n    if (s.falhas >= 2 && !s.em_baixo) {\n      s.em_baixo = true;\n      avisos.push({ canal: 'alertas', nivel: 'erro', mencionar: !a.teste, teste: a.teste,\n        titulo: `Em baixo: ${a.nome}`,\n        descricao: `Falhou ${s.falhas} verificações seguidas (desde as ${hora(s.desde)}). Aviso outra vez só quando voltar.`,\n        campos: [{ nome: 'O que vi', valor: motivo }, { nome: 'Endereço', valor: a.url.split('?')[0] }],\n        links: [{ texto: 'Abrir', url: a.url.split('?')[0] }], rodape: 'n8n: vigia do que é público' });\n    }\n  } else {\n    if (s.em_baixo) {\n      avisos.push({ canal: 'alertas', nivel: 'ok', mencionar: false, teste: a.teste,\n        titulo: `Voltou: ${a.nome}`,\n        descricao: `Responde outra vez. Esteve em baixo cerca de ${dur(agora - new Date(s.desde))} (desde as ${hora(s.desde)}).`,\n        campos: [{ nome: 'Último erro', valor: s.motivo || '?' }], rodape: 'n8n: vigia do que é público' });\n    }\n    s.falhas = 0; s.em_baixo = false; s.desde = null; s.motivo = null;\n  }\n  s.verificado = agora.toISOString();\n  st.alvos[a.id] = s;\n});\nreturn avisos.map((x) => ({ json: { aviso: x } }));\n"
+    }
+   },
+   {
+    "id": "391be811-622c-5d3c-95a7-a30b12d04e2b",
+    "name": "Enviar aviso (Discord)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.2,
+    "position": [
+     960,
+     0
+    ],
+    "parameters": {
+     "method": "POST",
+     "url": "http://10.0.0.30:8790/aviso",
+     "options": {
+      "timeout": 60000
+     },
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.aviso) }}"
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "SUBSTITUIR-servico",
+      "name": "Discord aprovações (X-Token)"
+     }
+    },
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000
+   }
+  ],
+  "connections": {
+   "De 5 em 5 minutos": {
+    "main": [
+     [
+      {
+       "node": "Escolher o que testar agora",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Executar à mão": {
+    "main": [
+     [
+      {
+       "node": "Escolher o que testar agora",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Escolher o que testar agora": {
+    "main": [
+     [
+      {
+       "node": "Pedir a página",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Pedir a página": {
+    "main": [
+     [
+      {
+       "node": "Avaliar e decidir avisos",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Avaliar e decidir avisos": {
+    "main": [
+     [
+      {
+       "node": "Enviar aviso (Discord)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "settings": {
+   "executionOrder": "v1",
+   "timezone": "Europe/Lisbon",
+   "saveDataErrorExecution": "all",
+   "saveDataSuccessExecution": "none",
+   "saveManualExecutions": true,
+   "callerPolicy": "workflowsFromSameOwner",
+   "errorWorkflow": "autoAvisarErros1"
+  },
+  "pinData": {},
+  "tags": []
+ }
+]
